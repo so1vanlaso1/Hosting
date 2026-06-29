@@ -69,6 +69,60 @@ Remote callers then use `http://<that-ip>:8080`.
 
 ---
 
+## Remote access over the internet (ngrok)
+
+To call the API from **outside your LAN** (a phone on cellular, another network,
+a cloud box), tunnel it with ngrok. No port-forwarding or firewall rule needed —
+ngrok opens an outbound connection and gives you a public **HTTPS** URL.
+
+1. Get a free authtoken: <https://dashboard.ngrok.com/get-started/your-authtoken>
+2. Start the server in one window, then the tunnel in another:
+
+```powershell
+# window 1 - the model server (downloads ngrok on first run)
+powershell -ExecutionPolicy Bypass -File .\3-start-server.ps1
+
+# window 2 - the public tunnel
+powershell -ExecutionPolicy Bypass -File .\4-start-tunnel.ps1 -AuthToken <your-token>
+```
+
+The token is saved to `ngrok-authtoken.txt` (git-ignored) on first run, so later
+you can just run `.\4-start-tunnel.ps1`. You can also supply it via
+`$env:NGROK_AUTHTOKEN`.
+
+It prints your public URL, e.g.:
+
+```
+  Tunnel is LIVE
+  Public  : https://abcd-1234.ngrok-free.app
+  API     : https://abcd-1234.ngrok-free.app/v1/chat/completions
+```
+
+Use that URL as the base for any client (`<public-url>/v1/...`), e.g.
+`.\test-client.ps1 -ServerUrl https://abcd-1234.ngrok-free.app`. Leave the
+window open; `Ctrl+C` closes the tunnel (or run `.\stop.ps1`).
+
+> ⚠️ **Secure it before tunneling.** This publishes your endpoint to the entire
+> internet. The default server config is **open (no API key)** — fine on a
+> trusted LAN, not on a public URL. Either:
+> - set `$RequireApiKey = $true` in `3-start-server.ps1` and restart (clients
+>   then need `Authorization: Bearer <key>`), **or**
+> - add ngrok-level auth: `.\4-start-tunnel.ps1 -BasicAuth 'user:pass'`.
+>
+> The tunnel script detects an open API and warns you. Inspect live requests at
+> <http://127.0.0.1:4040>.
+
+**Options** for `4-start-tunnel.ps1`:
+
+| Parameter     | Default | Notes                                                        |
+|---------------|---------|-------------------------------------------------------------|
+| `-AuthToken`  | —       | ngrok token. Falls back to `$env:NGROK_AUTHTOKEN`, then `ngrok-authtoken.txt`. |
+| `-Port`       | `8080`  | Local port to expose (match `$Port` in `3-start-server.ps1`).|
+| `-BasicAuth`  | —       | `"user:pass"` → ngrok requires HTTP basic auth on the tunnel.|
+| `-Domain`     | —       | Reserved/static ngrok domain (paid), e.g. `myllm.ngrok.app`. |
+
+---
+
 ## The API endpoint
 
 Base URL: `http://<this-pc-ip>:8080`

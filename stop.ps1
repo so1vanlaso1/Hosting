@@ -21,4 +21,11 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyC
         $stopped = $true
     }
 
+# 3) the ngrok tunnel (4-start-tunnel.ps1)
+Get-Process ngrok -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host "stopping ngrok (pid $($_.Id))"
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+    $stopped = $true
+}
+
 if (-not $stopped) { Write-Host "nothing was running" } else { Write-Host "stopped." }

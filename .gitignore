@@ -1,9 +1,13 @@
 # ─── Secrets / credentials ───────────────────────────────────────────────
 api-key.txt
+ngrok-authtoken.txt
 *.key
 *.pem
 .env
 .env.*
+
+# ─── ngrok (downloaded binary) ───────────────────────────────────────────
+ngrok/
 
 # ─── Models & downloaded weights (large binaries) ────────────────────────
 models/
