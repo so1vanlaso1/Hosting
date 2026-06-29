@@ -1,0 +1,54 @@
+# ─── Secrets / credentials ───────────────────────────────────────────────
+api-key.txt
+*.key
+*.pem
+.env
+.env.*
+
+# ─── Models & downloaded weights (large binaries) ────────────────────────
+models/
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.onnx
+
+# ─── llama.cpp runtime (downloaded prebuilt binaries, not source) ─────────
+llama.cpp/
+*.dll
+*.exe
+*.lib
+*.exp
+*.pdb
+
+# ─── Logs & runtime output ───────────────────────────────────────────────
+logs/
+*.log
+*.log.err
+*.jsonl
+
+# ─── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ─── Caches / scratch ────────────────────────────────────────────────────
+.cache/
+haha/
+
+# ─── OS / editor cruft ───────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
