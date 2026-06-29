@@ -19,14 +19,14 @@ $ErrorActionPreference = 'Stop'
 # --- tunables ---------------------------------------------------------------
 $Port        = 8080
 $BindHost    = '0.0.0.0'   # 0.0.0.0 = reachable from the LAN; 127.0.0.1 = local only
-$GpuLayers   = 99          # offload all layers to GPU. At $Context ≈ 64k this sits near the
-                           # 6 GB VRAM ceiling WITH MTP -- lower (e.g. ~30) if you hit OOM.
-$Context     = 32000      # 64K. MTP forces flash-attention OFF on this GPU (Turing
-                           # limitation in this build), which is VRAM-heavier, so ~64k is the
-                           # practical ceiling. (Drop MTP and you could run the full 131072 --
-                           # see the MTP note in README.md.)
-$CacheTypeK  = 'f16'       # MUST stay f16 while MTP is on: KV quantization (q8_0/q4_0)
-$CacheTypeV  = 'f16'       # requires flash-attention, which MTP can't use here. See README.
+$GpuLayers   = 99          # offload all layers to GPU. On 16 GB (RTX 5060 Ti) this is
+                           # comfortable even at full context -- lower (e.g. ~30) only if you OOM.
+$Context     = 131072     # full 128K. With flash-attention ON (Blackwell/Ampere+) the
+                           # attention buffers stay small, so the full context fits in 16 GB.
+                           # Lower this if you move to a smaller-VRAM card.
+$CacheTypeK  = 'q8_0'      # q8_0 KV cache ~halves KV VRAM at negligible quality cost. Quantized
+$CacheTypeV  = 'q8_0'      # KV requires flash-attention (-fa on, set below). Use 'f16' for max
+                           # quality -- 16 GB has room for it at this context.
 $CtxCheckpoints = 2        # max context checkpoints per slot (default ~32). Lower = less RAM
                            # (less prompt-cache reuse).
 $Alias       = 'gemma-4-E4B-it'
@@ -118,9 +118,10 @@ $serverArgs = @(
     '--host', $serverHost, '--port', $serverPort,
     '-ngl', $GpuLayers,
     '-c', $Context,
-    '-fa', 'off',                               # MTP crashes the flash-attn CUDA kernel on this
-                                                # GPU (Turing) -> FA must be OFF when MTP is on
-    '-ctk', $CacheTypeK, '-ctv', $CacheTypeV,   # f16 KV (quant needs FA, unavailable with MTP)
+    '-fa', 'on',                                # Blackwell/Ampere+ run MTP + flash-attention
+                                                # together (Turing could not). FA on = faster,
+                                                # less VRAM, and enables quantized KV below.
+    '-ctk', $CacheTypeK, '-ctv', $CacheTypeV,   # q8_0 KV (quantized KV requires -fa on)
     '-np', '1',                                 # single server slot -> one KV cache -> less RAM
     '-ctxcp', $CtxCheckpoints,                  # fewer context checkpoints -> less RAM
     '-md', $MtpDraft,                           # --- MTP self-speculative decoding ---

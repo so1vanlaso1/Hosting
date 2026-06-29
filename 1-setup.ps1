@@ -4,7 +4,11 @@
   runtime DLLs, and extracts both into .\llama.cpp\ so that llama-server.exe
   runs without a full CUDA Toolkit install.
 
-  Target GPU: NVIDIA GTX 1660 SUPER (Turing, sm_75) -> CUDA 12.4 build.
+  Target GPU: NVIDIA RTX 5060 Ti 16GB (Blackwell, sm_120) -> CUDA 13.3 build.
+  Blackwell / RTX 50-series REQUIRE CUDA 12.8+, so the 13.3 build is mandatory
+  (the 12.4 build will fail with "no kernel image" on these cards). The 13.3
+  build still supports Turing/Ampere/Ada too -- only drop to $CudaVer = '12.4'
+  for an older GPU whose driver predates CUDA 13.
   Run from this folder:  powershell -ExecutionPolicy Bypass -File .\1-setup.ps1
 #>
 
@@ -13,10 +17,12 @@ $ProgressPreference     = 'SilentlyContinue'   # massively speeds up Invoke-WebR
 
 # --- config -----------------------------------------------------------------
 $Release   = 'b9811'
+$CudaVer   = '13.3'   # 13.3 = REQUIRED for Blackwell / RTX 50-series (sm_120). Use '12.4'
+                      # only on an older GPU whose driver predates CUDA 13.
 $BaseUrl   = "https://github.com/ggml-org/llama.cpp/releases/download/$Release"
 $Assets    = @(
-    "llama-$Release-bin-win-cuda-12.4-x64.zip",   # binaries (llama-server.exe, ggml-cuda DLLs)
-    "cudart-llama-bin-win-cuda-12.4-x64.zip"      # CUDA runtime DLLs (cudart, cublas)
+    "llama-$Release-bin-win-cuda-$CudaVer-x64.zip",   # binaries (llama-server.exe, ggml-cuda DLLs)
+    "cudart-llama-bin-win-cuda-$CudaVer-x64.zip"      # CUDA runtime DLLs (cudart, cublas)
 )
 
 $Root      = $PSScriptRoot

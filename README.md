@@ -9,15 +9,17 @@ It runs with **MTP** (multi-token prediction self-speculative decoding) and a
 single-stream, low-RAM configuration — see
 [Performance / long context](#performance--long-context).
 
-- **GPU**: NVIDIA GTX 1660 SUPER (6 GB), all layers on the GPU.
-- **Server**: prebuilt llama.cpp CUDA binaries (release `b9811`, supports MTP).
-- **Access**: LAN only, protected by a generated API key.
+- **GPU**: NVIDIA RTX 5060 Ti 16 GB (Blackwell, sm_120), all layers on the GPU.
+- **Server**: prebuilt llama.cpp CUDA **13.3** binaries (release `b9811`, supports MTP).
+- **Access**: LAN, or the whole internet via the [ngrok tunnel](#remote-access-over-the-internet-ngrok). Auth is opt-in.
 
-> **Hardware note (important).** On this GPU (a Turing card) MTP and
-> flash-attention cannot run together — so this setup uses MTP with
-> flash-attention **off**, **f16** KV cache (no compression), and a context
-> ceiling around **64k**. See [Performance / long context](#performance--long-context)
-> for the full explanation and the no-MTP alternative (full 128k + compression).
+> **Hardware note (important).** Blackwell / RTX 50-series GPUs **require CUDA
+> 12.8+**, so `1-setup.ps1` pulls the **cuda-13.3** build (the 12.4 build crashes
+> with "no kernel image" on these cards). And because Blackwell runs **MTP and
+> flash-attention together** (Turing could not), this setup enables
+> **flash-attention on**, a **q8_0** KV cache, and the **full 128k** context — all
+> at once. Running on an older Turing card instead? See
+> [Older / smaller GPUs](#older--smaller-gpus).
 
 ---
 
@@ -32,7 +34,7 @@ powershell -ExecutionPolicy Bypass -File .\1-setup.ps1
 # 2. Download the model + MTP drafter (~4.28 GB total) into .\models\
 powershell -ExecutionPolicy Bypass -File .\2-download-model.ps1
 
-# 3. Start the API server (generates api-key.txt on first run)
+# 3. Start the API server (listens on :8080; open access by default)
 powershell -ExecutionPolicy Bypass -File .\3-start-server.ps1
 ```
 
@@ -185,9 +187,9 @@ Edit the tunables at the top of `3-start-server.ps1`:
 |-------------------|------------|----------------------------------------------------|
 | `$Port`           | `8080`     | Listening port.                                    |
 | `$BindHost`       | `0.0.0.0`  | `0.0.0.0` = LAN reachable; `127.0.0.1` = local only.|
-| `$GpuLayers`      | `99`       | GPU layers. At ~64k context this is near the 6 GB ceiling **with MTP** — **lower this (~30)** if you hit a CUDA/VRAM OOM. |
-| `$Context`        | `65536`    | Context window (64K). MTP forces flash-attention off, which is VRAM-heavier, so ~64k is the practical max here. Lower if you OOM. |
-| `$CacheTypeK/V`   | `f16`      | **Must stay `f16` while MTP is on** — KV quantization needs flash-attention, which MTP can't use on this GPU. |
+| `$GpuLayers`      | `99`       | GPU layers (all). Comfortable on 16 GB even at full context — lower (~30) only if you OOM. |
+| `$Context`        | `131072`   | Full 128k. With flash-attention on the buffers stay small, so it fits in 16 GB. Lower on a smaller card. |
+| `$CacheTypeK/V`   | `q8_0`     | Quantized KV (~half the VRAM); requires `-fa on`. Use `f16` for max quality — 16 GB has room. |
 | `$CtxCheckpoints` | `2`        | Max context checkpoints per slot (llama.cpp default ~32). Lower = less RAM (less prompt-cache reuse). |
 | `$Thinking`       | `$true`    | `$true` = model reasons first; `$false` = direct answers. |
 
@@ -198,42 +200,36 @@ on next start).
 
 ## Performance / long context
 
-`3-start-server.ps1` is configured around **MTP** plus a low-RAM, single-stream
-setup:
+`3-start-server.ps1` is tuned for the RTX 5060 Ti (Blackwell) with
+flash-attention **on** — which lets MTP, KV compression, and the full 128k
+context all run together:
 
 | Goal | Flags | Effect |
 |------|-------|--------|
-| **MTP generation** | `-md models\mtp-gemma-4-E4B-it.gguf --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-ngl 99` | MTP self-speculative decoding. The drafter (~60 MB) is the model's own MTP head; it loads/stops with the server. |
-| **MTP needs FA off** | `-fa off` | On this GPU, MTP + flash-attention crashes the CUDA kernel, so FA is off. |
-| **Single stream** | `-np 1` | One server slot → one KV cache instead of several → less RAM. |
-| **Fewer checkpoints** | `-ctxcp 2` (`$CtxCheckpoints`) | Context checkpoints down from the ~32 default → less RAM. |
+| **MTP generation** | `-md models\mtp-gemma-4-E4B-it.gguf --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-ngl 99` | MTP self-speculative decoding. The drafter (~60 MB) is the model's own MTP head; loads/stops with the server. On an FA-capable GPU this gives the published ~1.4–2.2× speedup. |
+| **Flash-attention** | `-fa on` | Smaller attention buffers (more context per GB) and faster decode. Blackwell runs it together with MTP. |
+| **KV compression** | `-ctk q8_0 -ctv q8_0` | ~Half the KV-cache VRAM at negligible quality cost. Requires `-fa on`; switch to `f16` for max quality. |
+| **Full context** | `-c 131072` | The model's full 128k window; fits comfortably in 16 GB with the above. |
+| **Single stream** | `-np 1` | One slot → lowest latency. With 16 GB you can raise this for concurrent requests. |
 
-### Hardware limitation on this GPU (read this)
+### Older / smaller GPUs
 
-The GTX 1660 SUPER is a **Turing** card. In llama.cpp build `b9811`, **MTP +
-flash-attention abort with a fatal `fattn.cu` CUDA error**, so MTP only runs with
-`-fa off`. That has two knock-on effects:
+The original tuning targeted a **GTX 1660 SUPER (Turing, 6 GB)**, where MTP +
+flash-attention **abort with a fatal `fattn.cu` error** — so FA had to be off,
+which in turn forced `f16` KV (no compression) and a ~64k context ceiling. To run
+on a Turing card:
 
-- **No KV-cache compression with MTP.** `q8_0`/`q4_0` KV requires flash-attention,
-  which is off — so the cache stays `f16`.
-- **~64k context ceiling.** Without FA the attention buffers are larger; ~64k is
-  the most that fits in 6 GB with MTP (it fails to load at ≥98k).
+- **Windows** — in `1-setup.ps1` set `$CudaVer = '12.4'` (only if your driver
+  predates CUDA 13); in `3-start-server.ps1` set `-fa off`, `$CacheTypeK/V = 'f16'`,
+  and lower `$Context` (~32k–64k).
+- **Linux** — `FA=off KV=f16 CTX=32000 bash ./3-start-server.sh`.
 
-Measured here (8k context, fresh): **no-MTP + FA + q8 ≈ 47 tok/s** vs
-**MTP + FA-off ≈ 38 tok/s** — i.e. on *this* card MTP is a bit *slower*, because
-losing flash-attention costs more than MTP gains. MTP's published ~1.4–2.2×
-speedups assume an FA-capable GPU (RTX 30-series / Ampere+).
-
-### If you'd rather have full 128k + compression (no MTP)
-
-Edit `3-start-server.ps1`: remove the `-md / --spec-type / --spec-draft-*` args,
-set `-fa on`, `$CacheTypeK/V = 'q8_0'`, and `$Context = 131072`. That config runs
-the full 128k context with a compressed KV cache and is the fastest option on
-this GPU. To get MTP *and* FA *and* compression together you'd need an
-Ampere-or-newer GPU (or a future llama.cpp build that fixes MTP+FA on Turing).
+On Turing, MTP can even be slightly *slower* than plain FA decoding (losing FA
+costs more than MTP gains); the published speedups assume an Ampere-or-newer GPU.
 
 ### Tuning order when something doesn't fit
-1. **CUDA / VRAM OOM** → lower `$GpuLayers` (e.g. `99 → 30`), then `$Context`.
+1. **CUDA / VRAM OOM** → lower `$Context` (e.g. `131072 → 65536`), then
+   `$GpuLayers` (e.g. `99 → 30`).
 2. **MTP not helping** (acceptance ~0 in the per-request log) → swap the drafter
    for `MTP\gemma-4-E4B-it-Q8_0-MTP.gguf` (download it the same way, then point
    `$MtpDraft` at it).
@@ -282,15 +278,18 @@ click it to expand. If you don't see it at all, hard-refresh the page
 
 ## Troubleshooting
 
-- **CUDA out of memory (VRAM)** — lower `$Context` (e.g. `65536 → 32768`), then
+- **CUDA out of memory (VRAM)** — lower `$Context` (e.g. `131072 → 65536`), then
   `$GpuLayers` (e.g. `99 → 30`). See [Performance / long context](#performance--long-context).
-- **`fattn.cu` fatal error on start** — MTP + flash-attention on a Turing GPU.
-  Ensure `-fa off` (it is by default); don't set `$CacheTypeK/V` to a quantized
-  type while MTP is on (quantized KV would force FA back on).
+- **`no kernel image is available` / instant crash on a 50-series card** — you're
+  on the CUDA 12.4 build. Blackwell needs 12.8+: keep `$CudaVer = '13.3'` in
+  `1-setup.ps1` (the default) and update your NVIDIA driver to a CUDA-13-capable one.
+- **`fattn.cu` fatal error on start** — MTP + flash-attention on a **Turing** GPU.
+  On Turing set `-fa off` and `$CacheTypeK/V = 'f16'` (see
+  [Older / smaller GPUs](#older--smaller-gpus)). Not applicable to Blackwell.
 - **System RAM too high** — lower `$Context` or set `$CtxCheckpoints` to `1`.
-- **CUDA DLL fails to load / no GPU used** — update your NVIDIA driver
-  (`winget upgrade --id Nvidia.GeForceExperience` or download from nvidia.com).
-  As an alternative, re-run setup pointing at the `cuda-13.3` asset variant.
+- **CUDA DLL fails to load / no GPU used** — update your NVIDIA driver (download
+  from nvidia.com). For an older GPU on an old driver, set `$CudaVer = '12.4'` in
+  `1-setup.ps1` and re-run setup.
 - **Remote machine can't connect** — confirm the firewall rule exists, the
   network profile is **Private**, both machines are on the same subnet, and the
   server log shows `listening on http://0.0.0.0:8080` (not `127.0.0.1`).
